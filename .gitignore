@@ -1,0 +1,59 @@
+# Arquivos de configuração do Streamlit
+.streamlit/secrets.toml
+.streamlit/config.toml
+
+# Arquivos Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Ambientes virtuais
+venv/
+env/
+ENV/
+.venv
+
+# Banco de dados local
+*.db
+*.sqlite
+*.sqlite3
+
+# Arquivos de log
+*.log
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Variáveis de ambiente
+.env
+.env.local
+
+# Arquivos de dados sensíveis
+data/
+uploads/
+*.csv
+*.xlsx
+*.json
+
+# Cache do pytest
+.pytest_cache/
+.coverage
+
+# Distribuição / empacotamento
+dist/
+build/
+*.egg-info/
