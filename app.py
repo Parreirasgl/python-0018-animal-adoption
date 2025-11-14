@@ -98,10 +98,11 @@ def init_db():
     cursor = conn.cursor()
 
     # --- Tabela Adotantes ---
+    # CORREÇÃO 1: Removido 'UNIQUE' da coluna 'nome'
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS adotantes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL UNIQUE
+        nome TEXT NOT NULL
     );
     ''')
     
@@ -135,10 +136,11 @@ def init_db():
                 pass
 
     # --- Tabela Animais ---
+    # CORREÇÃO 1: Removido 'UNIQUE' da coluna 'nome'
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS animais (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL UNIQUE
+        nome TEXT NOT NULL
     );
     ''')
 
@@ -218,8 +220,7 @@ def add_data(table_name, data):
         conn.commit()
         st.success(f"Registro '{data['nome']}' (ID: {new_id}) adicionado com sucesso à tabela '{table_name}'!")
     
-    except sqlite3.IntegrityError:
-        st.error(f"Erro: O nome '{data['nome']}' já existe na tabela '{table_name}'.")
+    # CORREÇÃO 1: Removido o 'except' específico para 'IntegrityError' (nomes duplicados)
     except Exception as e:
         st.error(f"Ocorreu um erro: {e}")
     finally:
@@ -311,8 +312,7 @@ def update_data(table_name, id_, data):
         conn.commit()
         st.success(f"Registro '{data['nome']}' (ID: {id_}) atualizado com sucesso!")
         
-    except sqlite3.IntegrityError:
-         st.error(f"Erro: O nome '{data['nome']}' já existe na tabela '{table_name}'.")
+    # CORREÇÃO 1: Removido o 'except' específico para 'IntegrityError' (nomes duplicados)
     except Exception as e:
         st.error(f"Ocorreu um erro ao atualizar: {e}")
     finally:
@@ -347,10 +347,17 @@ def replace_table_from_csv(table_name, uploaded_file):
         cursor = conn.cursor()
         
         try:
+            # 1. Apaga os dados antigos
             cursor.execute(f"DELETE FROM {table_name}")
+            
+            # CORREÇÃO 2: Zera o contador de AUTOINCREMENT
+            cursor.execute(f"DELETE FROM sqlite_sequence WHERE name='{table_name}'")
+            
+            # 2. Insere os novos dados
             df_to_insert.to_sql(table_name, conn, if_exists='append', index=False)
+            
             conn.commit()
-            message = f"Tabela '{table_name}' substituída com sucesso! {len(df_to_insert)} registros inseridos."
+            message = f"Tabela '{table_name}' substituída com sucesso! {len(df_to_insert)} registros inseridos (IDs reiniciados)."
             return (True, message)
             
         except Exception as e:
@@ -461,7 +468,8 @@ def page_ver_tabela(table_name, title):
     if df.empty:
         st.info("A tabela está vazia.")
     else:
-        st.dataframe(df, width='stretch')
+        # CORREÇÃO 3: Adicionado hide_index=True
+        st.dataframe(df, width='stretch', hide_index=True)
 
 def page_formulario(table_name, title):
     """Página de formulário para adicionar novos registros."""
@@ -511,8 +519,6 @@ def page_editar_dados(table_name, title):
     """Página para editar registros existentes."""
     st.title(title)
     
-    # --- ALTERAÇÃO AQUI ---
-    # Removido min_value=1, adicionado placeholder, value=None
     search_id = st.number_input(
         f"Digite o ID ({table_name}) para buscar e editar:",
         step=1,
@@ -520,18 +526,14 @@ def page_editar_dados(table_name, title):
         placeholder="Digite o ID para buscar...",
         key=f"search_{table_name}"
     )
-    # --- FIM DA ALTERAÇÃO ---
     
     if not search_id:
         st.info("Digite um ID para iniciar a busca.")
         return
 
-    # --- ALTERAÇÃO AQUI ---
-    # Adicionada verificação manual
     if search_id < 1:
         st.warning("O ID deve ser um número positivo (maior que 0).")
         return
-    # --- FIM DA ALTERAÇÃO ---
 
     db_data = find_data_by_id(table_name, search_id)
     
@@ -769,26 +771,20 @@ def page_compatibilidade():
     """Página para calcular e exibir animais compatíveis com um adotante."""
     st.title("Animais Compatíveis")
     
-    # --- ALTERAÇÃO AQUI ---
-    # Removido min_value=1, adicionado placeholder, value=None
     search_id = st.number_input(
         "Digite o ID do Adotante para buscar compatibilidade:",
         step=1,
         value=None,
         placeholder="Digite o ID do adotante..."
     )
-    # --- FIM DA ALTERAÇÃO ---
     
     if not search_id:
         st.info("Digite o ID de um adotante cadastrado para ver os animais compatíveis.")
         return
 
-    # --- ALTERAÇÃO AQUI ---
-    # Adicionada verificação manual
     if search_id < 1:
         st.warning("O ID deve ser um número positivo (maior que 0).")
         return
-    # --- FIM DA ALTERAÇÃO ---
 
     # 1. Buscar o adotante por ID
     adotante = find_data_by_id("adotantes", search_id)
@@ -844,10 +840,7 @@ def page_compatibilidade():
         resultado_final = sorted_scores
     else:
         score_do_decimo = sorted_scores[9]['score']
-        # --- ALTERAÇÃO AQUI ---
-        # Corrigido erro de digitação de 'score_do_cimo' para 'score_do_decimo'
         resultado_final = [s for s in sorted_scores if s['score'] >= score_do_decimo]
-        # --- FIM DA ALTERAÇÃO ---
 
     # 5. Exibir os resultados
     st.subheader(f"Lista de {len(resultado_final)} Animais Mais Compatíveis (Tipo: {tipo_preferido}):")
@@ -855,7 +848,9 @@ def page_compatibilidade():
     df_resultado = pd.DataFrame(resultado_final)
     # Reordena colunas para incluir ID
     df_resultado = df_resultado[['id', 'nome', 'score']] 
-    df_resultado.index = df_resultado.index + 1
+    
+    # Define o índice como o Rank (começando em 1)
+    df_resultado.index = df_resultado.index + 1 
     
     st.dataframe(
         df_resultado.style.format({'score': '{:.4f}'}),
