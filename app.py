@@ -209,8 +209,11 @@ def add_data(table_name, data):
         query = f"INSERT INTO {table_name} ({cols_str}) VALUES ({placeholders})"
 
         cursor.execute(query, params)
+        
+        # Captura o ID e exibe
+        new_id = cursor.lastrowid
         conn.commit()
-        st.success(f"Registro '{data['nome']}' adicionado com sucesso à tabela '{table_name}'!")
+        st.success(f"Registro '{data['nome']}' (ID: {new_id}) adicionado com sucesso à tabela '{table_name}'!")
     
     except sqlite3.IntegrityError:
         st.error(f"Erro: O nome '{data['nome']}' já existe na tabela '{table_name}'.")
@@ -239,13 +242,22 @@ def get_all_data(table_name):
         conn.close()
 
 def find_data_by_name(table_name, nome):
-    """Encontra um registro específico pelo nome."""
+    """Encontra um registro específico pelo nome (usado na pág. compatibilidade)."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(f"SELECT * FROM {table_name} WHERE nome = ?", (nome,))
     data = cursor.fetchone()
     conn.close()
     return data 
+
+def find_data_by_id(table_name, id):
+    """Encontra um registro específico pelo ID (usado na pág. editar)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT * FROM {table_name} WHERE id = ?", (id,))
+    data = cursor.fetchone()
+    conn.close()
+    return data
 
 def update_data(table_name, id, data):
     """Atualiza um registro existente no banco de dados."""
@@ -503,13 +515,19 @@ def page_editar_dados(table_name, title):
     """Página para editar registros existentes."""
     st.title(title)
     
-    search_name = st.text_input(f"Digite o nome ({table_name}) para buscar e editar:", key=f"search_{table_name}")
+    search_id = st.number_input(
+        f"Digite o ID ({table_name}) para buscar e editar:",
+        min_value=1,
+        step=1,
+        value=None, # Inicia vazio
+        key=f"search_{table_name}"
+    )
     
-    if not search_name:
-        st.info("Digite um nome para iniciar a busca.")
+    if not search_id:
+        st.info("Digite um ID para iniciar a busca.")
         return
 
-    db_data = find_data_by_name(table_name, search_name)
+    db_data = find_data_by_id(table_name, search_id)
     
     # Chave única para o ID no session_state
     id_key = f"edit_id_{table_name}"
@@ -634,7 +652,9 @@ def page_editar_dados(table_name, title):
                 st.rerun()
 
     else:
-        st.warning(f"Nenhum registro encontrado com o nome: '{search_name}'")
+        if search_id: # Só mostra o aviso se um ID foi digitado
+            st.warning(f"Nenhum registro encontrado com o ID: {search_id}")
+            
         # Limpa o state se o nome não for encontrado
         keys_to_clear = [id_key, f"edit_nome_{table_name}"]
         if table_name == 'adotantes':
@@ -747,14 +767,14 @@ def page_compatibilidade():
         st.info("Digite o nome de um adotante cadastrado para ver os animais compatíveis.")
         return
 
-    # 1. Buscar o adotante
+    # 1. Buscar o adotante (continua por NOME para conveniência)
     adotante = find_data_by_name("adotantes", search_name)
     
     if not adotante:
         st.error(f"Adotante com nome '{search_name}' não encontrado.")
         return
         
-    st.success(f"Calculando compatibilidade para: **{adotante['nome']}**")
+    st.success(f"Calculando compatibilidade para: **{adotante['nome']}** (ID: {adotante['id']})")
     
     # Exibe as preferências do adotante
     with st.expander("Ver preferências e pesos do Adotante"):
@@ -818,8 +838,8 @@ paginas = {
     "Ver tabela de animais": "page_ver_animais",
     "Acrescentar arquivos CSV": "page_upload_csv",
     "Baixar arquivos CSV": "page_baixar_csv",
-    "Formulário do adotante": "page_form_adotante",
-    "Formulário do animal": "page_form_animal",
+    "Acrescentar um adotante": "page_form_adotante", # --- NOME ALTERADO ---
+    "Acrescentar um animal": "page_form_animal",     # --- NOME ALTERADO ---
     "Editar dados do adotante": "page_edit_adotante",
     "Editar dados do animal": "page_edit_animal",
     "Animais compatíveis": "page_compatibilidade"
@@ -840,11 +860,11 @@ elif escolha == "Acrescentar arquivos CSV":
 elif escolha == "Baixar arquivos CSV":
     page_baixar_csv()
 
-elif escolha == "Formulário do adotante":
-    page_formulario("adotantes", "Formulário do Adotante")
+elif escolha == "Acrescentar um adotante": # --- NOME ALTERADO ---
+    page_formulario("adotantes", "Acrescentar um Adotante") # --- TÍTULO ALTERADO ---
 
-elif escolha == "Formulário do animal":
-    page_formulario("animais", "Formulário do Animal")
+elif escolha == "Acrescentar um animal": # --- NOME ALTERADO ---
+    page_formulario("animais", "Acrescentar um Animal") # --- TÍTULO ALTERADO ---
 
 elif escolha == "Editar dados do adotante":
     page_editar_dados("adotantes", "Editar Dados do Adotante")
