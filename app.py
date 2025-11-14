@@ -451,7 +451,7 @@ def page_editar_dados(table_name, title):
             if key in st.session_state:
                 del st.session_state[key]
 
-# --- PÁGINA DE UPLOAD CSV (NOVA) ---
+# --- PÁGINA DE UPLOAD CSV (CORRIGIDA) ---
 
 def page_upload_csv():
     """Página para substituir dados da tabela por um arquivo CSV."""
@@ -469,8 +469,7 @@ def page_upload_csv():
         # Adiciona um botão de confirmação antes da ação destrutiva
         if st.button("Confirmar Substituição - ANIMAIS"):
             replace_table_from_csv("animais", uploader_animais)
-            # Limpa o uploader após a execução
-            st.session_state.uploader_animais = None
+            # --- LINHA REMOVIDA DAQUI ---
             st.rerun()
 
     st.markdown("---")
@@ -484,8 +483,7 @@ def page_upload_csv():
          # Adiciona um botão de confirmação
         if st.button("Confirmar Substituição - ADOTANTES"):
             replace_table_from_csv("adotantes", uploader_adotantes)
-            # Limpa o uploader após a execução
-            st.session_state.uploader_adotantes = None
+            # --- LINHA REMOVIDA DAQUI ---
             st.rerun()
 
 
