@@ -425,8 +425,10 @@ def calculate_scores(adotante, animais_filtrados_df):
                 score = 0.0
             else:
                 score = numerador / denominador_completo
-                
-            scores_list.append({'nome': animal['nome'], 'score': score})
+            
+            # --- ALTERAÇÃO AQUI ---
+            # Adiciona o ID do animal ao dicionário de resultados
+            scores_list.append({'id': animal['id'], 'nome': animal['nome'], 'score': score})
 
         # 4. Ordenar a lista final
         sorted_scores = sorted(scores_list, key=lambda x: x['score'], reverse=True)
@@ -461,8 +463,7 @@ def page_ver_tabela(table_name, title):
     if df.empty:
         st.info("A tabela está vazia.")
     else:
-        # --- ALTERAÇÃO AQUI ---
-        st.dataframe(df, width='stretch') # Adicionando para melhor layout
+        st.dataframe(df, width='stretch') # Adicionado para melhor layout
 
 def page_formulario(table_name, title):
     """Página de formulário para adicionar novos registros."""
@@ -831,12 +832,14 @@ def page_compatibilidade():
     st.subheader(f"Lista de {len(resultado_final)} Animais Mais Compatíveis (Tipo: {tipo_preferido}):")
     
     df_resultado = pd.DataFrame(resultado_final)
+    # --- ALTERAÇÃO AQUI ---
+    # Reordena colunas para incluir ID
+    df_resultado = df_resultado[['id', 'nome', 'score']] 
     df_resultado.index = df_resultado.index + 1
     
-    # --- ALTERAÇÃO AQUI ---
     st.dataframe(
         df_resultado.style.format({'score': '{:.4f}'}),
-        width='stretch' # Correção da depreciação
+        width='stretch'
     )
 
 
