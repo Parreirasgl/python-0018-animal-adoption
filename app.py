@@ -14,7 +14,8 @@ TIPO_OPTIONS = ['cão', 'gato']
 # Dicionário mestre das 10 CARACTERÍSTICAS que entram no score.
 CARACTERISTICAS = {
     'tamanho': {
-        'map': {'pequeno': '100', 'médio': '010', 'grande': '001'},
+        # --- ALTERAÇÃO AQUI ---
+        'map': {'pequeno': '100', 'medio': '010', 'grande': '001'}, 
         'q_adotante': 'Que tamanho de animal você prefere?',
         'q_animal': 'Porte do animal:'
     },
@@ -110,7 +111,7 @@ def init_db():
     existing_cols_adotantes = [col['name'] for col in cursor.fetchall()]
 
     # Define colunas necessárias (Nome já existe)
-    # Adiciona 'contato' e 'tipo' manualmente
+    # Adiciona 'contato' e 'tipo' manually
     required_cols_adotantes = {
         "contato": "TEXT",
         "tipo": "TEXT DEFAULT 'cão'" # Valor padrão 'cão'
@@ -118,18 +119,18 @@ def init_db():
     
     # Adiciona as 10 features, códigos e pesos
     for feature in COLUNAS_FEATURES:
-        map = CARACTERISTICAS[feature]['map']
-        default_peso = str(5) * len(list(map.values())[0]) 
+        map_ = CARACTERISTICAS[feature]['map']
+        default_peso = str(5) * len(list(map_.values())[0]) 
         
         required_cols_adotantes[feature] = "TEXT"
         required_cols_adotantes[f"codigo_{feature}"] = "TEXT"
         required_cols_adotantes[f"peso_{feature}"] = f"TEXT DEFAULT '{default_peso}'"
 
     # Adiciona colunas faltantes para Adotantes
-    for col, type in required_cols_adotantes.items():
+    for col, type_ in required_cols_adotantes.items():
         if col not in existing_cols_adotantes:
             try:
-                cursor.execute(f"ALTER TABLE adotantes ADD COLUMN {col} {type}")
+                cursor.execute(f"ALTER TABLE adotantes ADD COLUMN {col} {type_}")
                 st.info(f"Coluna '{col}' adicionada à tabela 'adotantes'.")
             except sqlite3.OperationalError as e:
                 st.warning(f"Não foi possível adicionar coluna {col}: {e}")
@@ -157,10 +158,10 @@ def init_db():
         required_cols_animais[f"codigo_{feature}"] = "TEXT"
 
     # Adiciona colunas faltantes para Animais
-    for col, type in required_cols_animais.items():
+    for col, type_ in required_cols_animais.items():
         if col not in existing_cols_animais:
             try:
-                cursor.execute(f"ALTER TABLE animais ADD COLUMN {col} {type}")
+                cursor.execute(f"ALTER TABLE animais ADD COLUMN {col} {type_}")
                 st.info(f"Coluna '{col}' adicionada à tabela 'animais'.")
             except sqlite3.OperationalError as e:
                 st.warning(f"Não foi possível adicionar coluna {col}: {e}")
@@ -254,16 +255,16 @@ def find_data_by_name(table_name, nome):
     conn.close()
     return data 
 
-def find_data_by_id(table_name, id):
+def find_data_by_id(table_name, id_):
     """Encontra um registro específico pelo ID (usado na pág. editar)."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(f"SELECT * FROM {table_name} WHERE id = ?", (id,))
+    cursor.execute(f"SELECT * FROM {table_name} WHERE id = ?", (id_,))
     data = cursor.fetchone()
     conn.close()
     return data
 
-def update_data(table_name, id, data):
+def update_data(table_name, id_, data):
     """Atualiza um registro existente no banco de dados."""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -302,7 +303,7 @@ def update_data(table_name, id, data):
                 params.append(peso_str)
         
         # Adiciona o ID no final para o WHERE
-        params.append(id)
+        params.append(id_)
         
         # Constrói a query
         set_str = ", ".join(set_parts)
@@ -310,7 +311,7 @@ def update_data(table_name, id, data):
         
         cursor.execute(query, params)
         conn.commit()
-        st.success(f"Registro '{data['nome']}' (ID: {id}) atualizado com sucesso!")
+        st.success(f"Registro '{data['nome']}' (ID: {id_}) atualizado com sucesso!")
         
     except sqlite3.IntegrityError:
          st.error(f"Erro: O nome '{data['nome']}' já existe na tabela '{table_name}'.")
@@ -759,7 +760,6 @@ def page_compatibilidade():
     """Página para calcular e exibir animais compatíveis com um adotante."""
     st.title("Animais Compatíveis")
     
-    # --- MUDANÇA: Buscar por ID ---
     search_id = st.number_input(
         "Digite o ID do Adotante para buscar compatibilidade:",
         min_value=1,
