@@ -14,8 +14,7 @@ TIPO_OPTIONS = ['cão', 'gato']
 # Dicionário mestre das 10 CARACTERÍSTICAS que entram no score.
 CARACTERISTICAS = {
     'tamanho': {
-        # --- ALTERAÇÃO AQUI ---
-        'map': {'pequeno': '100', 'medio': '010', 'grande': '001'}, 
+        'map': {'pequeno': '100', 'medio': '010', 'grande': '001'},
         'q_adotante': 'Que tamanho de animal você prefere?',
         'q_animal': 'Porte do animal:'
     },
@@ -462,7 +461,8 @@ def page_ver_tabela(table_name, title):
     if df.empty:
         st.info("A tabela está vazia.")
     else:
-        st.dataframe(df)
+        # --- ALTERAÇÃO AQUI ---
+        st.dataframe(df, width='stretch') # Adicionando para melhor layout
 
 def page_formulario(table_name, title):
     """Página de formulário para adicionar novos registros."""
@@ -833,9 +833,10 @@ def page_compatibilidade():
     df_resultado = pd.DataFrame(resultado_final)
     df_resultado.index = df_resultado.index + 1
     
+    # --- ALTERAÇÃO AQUI ---
     st.dataframe(
         df_resultado.style.format({'score': '{:.4f}'}),
-        use_container_width=True
+        width='stretch' # Correção da depreciação
     )
 
 
