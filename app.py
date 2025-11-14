@@ -426,7 +426,6 @@ def calculate_scores(adotante, animais_filtrados_df):
             else:
                 score = numerador / denominador_completo
             
-            # --- ALTERAÇÃO AQUI ---
             # Adiciona o ID do animal ao dicionário de resultados
             scores_list.append({'id': animal['id'], 'nome': animal['nome'], 'score': score})
 
@@ -463,7 +462,7 @@ def page_ver_tabela(table_name, title):
     if df.empty:
         st.info("A tabela está vazia.")
     else:
-        st.dataframe(df, width='stretch') # Adicionado para melhor layout
+        st.dataframe(df, width='stretch')
 
 def page_formulario(table_name, title):
     """Página de formulário para adicionar novos registros."""
@@ -513,13 +512,17 @@ def page_editar_dados(table_name, title):
     """Página para editar registros existentes."""
     st.title(title)
     
+    # --- ALTERAÇÃO AQUI ---
+    # Troca 'value=None' por 'value="placeholder"'
     search_id = st.number_input(
         f"Digite o ID ({table_name}) para buscar e editar:",
         min_value=1,
         step=1,
-        value=None,
+        value="placeholder", 
+        placeholder="Digite o ID para buscar...",
         key=f"search_{table_name}"
     )
+    # --- FIM DA ALTERAÇÃO ---
     
     if not search_id:
         st.info("Digite um ID para iniciar a busca.")
@@ -761,12 +764,16 @@ def page_compatibilidade():
     """Página para calcular e exibir animais compatíveis com um adotante."""
     st.title("Animais Compatíveis")
     
+    # --- ALTERAÇÃO AQUI ---
+    # Troca 'value=None' por 'value="placeholder"'
     search_id = st.number_input(
         "Digite o ID do Adotante para buscar compatibilidade:",
         min_value=1,
         step=1,
-        value=None
+        value="placeholder",
+        placeholder="Digite o ID do adotante..."
     )
+    # --- FIM DA ALTERAÇÃO ---
     
     if not search_id:
         st.info("Digite o ID de um adotante cadastrado para ver os animais compatíveis.")
@@ -826,13 +833,12 @@ def page_compatibilidade():
         resultado_final = sorted_scores
     else:
         score_do_decimo = sorted_scores[9]['score']
-        resultado_final = [s for s in sorted_scores if s['score'] >= score_do_decimo]
+        resultado_final = [s for s in sorted_scores if s['score'] >= score_do_cimo]
 
     # 5. Exibir os resultados
     st.subheader(f"Lista de {len(resultado_final)} Animais Mais Compatíveis (Tipo: {tipo_preferido}):")
     
     df_resultado = pd.DataFrame(resultado_final)
-    # --- ALTERAÇÃO AQUI ---
     # Reordena colunas para incluir ID
     df_resultado = df_resultado[['id', 'nome', 'score']] 
     df_resultado.index = df_resultado.index + 1
