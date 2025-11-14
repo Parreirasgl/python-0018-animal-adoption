@@ -130,9 +130,9 @@ def init_db():
         if col not in existing_cols_adotantes:
             try:
                 cursor.execute(f"ALTER TABLE adotantes ADD COLUMN {col} {type_}")
-                st.info(f"Coluna '{col}' adicionada à tabela 'adotantes'.")
-            except sqlite3.OperationalError as e:
-                st.warning(f"Não foi possível adicionar coluna {col}: {e}")
+            except sqlite3.OperationalError:
+                # Coluna pode já existir de uma execução anterior falha
+                pass
 
     # --- Tabela Animais ---
     cursor.execute('''
@@ -161,9 +161,8 @@ def init_db():
         if col not in existing_cols_animais:
             try:
                 cursor.execute(f"ALTER TABLE animais ADD COLUMN {col} {type_}")
-                st.info(f"Coluna '{col}' adicionada à tabela 'animais'.")
-            except sqlite3.OperationalError as e:
-                st.warning(f"Não foi possível adicionar coluna {col}: {e}")
+            except sqlite3.OperationalError:
+                pass
     
     conn.commit()
     conn.close()
@@ -513,12 +512,11 @@ def page_editar_dados(table_name, title):
     st.title(title)
     
     # --- ALTERAÇÃO AQUI ---
-    # Troca 'value=None' por 'value="placeholder"'
+    # Removido min_value=1, adicionado placeholder, value=None
     search_id = st.number_input(
         f"Digite o ID ({table_name}) para buscar e editar:",
-        min_value=1,
         step=1,
-        value="placeholder", 
+        value=None, 
         placeholder="Digite o ID para buscar...",
         key=f"search_{table_name}"
     )
@@ -527,6 +525,13 @@ def page_editar_dados(table_name, title):
     if not search_id:
         st.info("Digite um ID para iniciar a busca.")
         return
+
+    # --- ALTERAÇÃO AQUI ---
+    # Adicionada verificação manual
+    if search_id < 1:
+        st.warning("O ID deve ser um número positivo (maior que 0).")
+        return
+    # --- FIM DA ALTERAÇÃO ---
 
     db_data = find_data_by_id(table_name, search_id)
     
@@ -765,12 +770,11 @@ def page_compatibilidade():
     st.title("Animais Compatíveis")
     
     # --- ALTERAÇÃO AQUI ---
-    # Troca 'value=None' por 'value="placeholder"'
+    # Removido min_value=1, adicionado placeholder, value=None
     search_id = st.number_input(
         "Digite o ID do Adotante para buscar compatibilidade:",
-        min_value=1,
         step=1,
-        value="placeholder",
+        value=None,
         placeholder="Digite o ID do adotante..."
     )
     # --- FIM DA ALTERAÇÃO ---
@@ -778,6 +782,13 @@ def page_compatibilidade():
     if not search_id:
         st.info("Digite o ID de um adotante cadastrado para ver os animais compatíveis.")
         return
+
+    # --- ALTERAÇÃO AQUI ---
+    # Adicionada verificação manual
+    if search_id < 1:
+        st.warning("O ID deve ser um número positivo (maior que 0).")
+        return
+    # --- FIM DA ALTERAÇÃO ---
 
     # 1. Buscar o adotante por ID
     adotante = find_data_by_id("adotantes", search_id)
@@ -833,7 +844,10 @@ def page_compatibilidade():
         resultado_final = sorted_scores
     else:
         score_do_decimo = sorted_scores[9]['score']
-        resultado_final = [s for s in sorted_scores if s['score'] >= score_do_cimo]
+        # --- ALTERAÇÃO AQUI ---
+        # Corrigido erro de digitação de 'score_do_cimo' para 'score_do_decimo'
+        resultado_final = [s for s in sorted_scores if s['score'] >= score_do_decimo]
+        # --- FIM DA ALTERAÇÃO ---
 
     # 5. Exibir os resultados
     st.subheader(f"Lista de {len(resultado_final)} Animais Mais Compatíveis (Tipo: {tipo_preferido}):")
@@ -851,7 +865,12 @@ def page_compatibilidade():
 
 # --- Execução Principal da Aplicação ---
 
-init_db()
+try:
+    init_db()
+except Exception as e:
+    st.error(f"Falha ao inicializar o banco de dados: {e}")
+    st.stop()
+
 
 st.sidebar.title("Navegação da Aplicação")
 st.sidebar.info("Sistema de Gerenciamento de Adoções")
