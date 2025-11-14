@@ -32,7 +32,7 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Tabela de Adotantes (COM NOVAS COLUNAS DE PESO)
+    # Tabela de Adotantes
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS adotantes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +46,7 @@ def init_db():
     );
     ''')
     
-    # Tabela de Animais (INALTERADA)
+    # Tabela de Animais
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS animais (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,7 +113,7 @@ def get_all_data(table_name):
                     conn.commit()
                     st.info("Esquema atualizado. Registros antigos têm peso '5' por padrão.")
                 except sqlite3.OperationalError as e:
-                    # Ignora se a coluna já existe (acontece em concorrência)
+                    # Ignora se a coluna já existe
                     if "duplicate column name" not in str(e):
                         raise e
 
@@ -166,7 +166,57 @@ def update_data(table_name, id, nome, tamanho, moradia, peso_tamanho=None, peso_
     finally:
         conn.close()
 
-# --- Funções de Cálculo de Score (NOVA) ---
+def replace_table_from_csv(table_name, uploaded_file):
+    """Apaga todos os dados de uma tabela e os substitui por um CSV."""
+    
+    # Define as colunas obrigatórias para cada tabela
+    if table_name == 'animais':
+        required_cols = ['nome', 'tamanho', 'codigo_tamanho', 'moradia', 'codigo_moradia']
+    elif table_name == 'adotantes':
+        required_cols = ['nome', 'tamanho', 'codigo_tamanho', 'moradia', 'codigo_moradia', 'peso_tamanho', 'peso_moradia']
+    else:
+        st.error(f"Tabela '{table_name}' desconhecida.")
+        return
+
+    try:
+        df = pd.read_csv(uploaded_file)
+        
+        # 1. Validação: Verifica se todas as colunas necessárias existem no CSV
+        if not all(col in df.columns for col in required_cols):
+            st.error(f"Erro: O CSV não contém todas as colunas necessárias. Faltando: {set(required_cols) - set(df.columns)}")
+            st.info(f"Colunas necessárias: {required_cols}")
+            st.info(f"Colunas encontradas: {list(df.columns)}")
+            return
+            
+        # 2. Seleciona apenas as colunas necessárias (ignora 'id' ou extras)
+        df_to_insert = df[required_cols]
+
+        # 3. Transação: Apaga os dados antigos e insere os novos
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # 3.1 Apaga dados antigos
+            cursor.execute(f"DELETE FROM {table_name}")
+            st.warning(f"Dados antigos da tabela '{table_name}' apagados.")
+            
+            # 3.2 Insere dados novos usando a função 'to_sql' do pandas
+            df_to_insert.to_sql(table_name, conn, if_exists='append', index=False)
+            
+            conn.commit()
+            st.success(f"Tabela '{table_name}' substituída com sucesso! {len(df_to_insert)} registros inseridos.")
+            
+        except Exception as e:
+            conn.rollback() # Desfaz a operação em caso de erro
+            st.error(f"Falha na transação com o banco de dados: {e}")
+        finally:
+            conn.close()
+
+    except Exception as e:
+        st.error(f"Erro ao ler o arquivo CSV: {e}")
+
+
+# --- Funções de Cálculo de Score ---
 
 def calculate_scores(adotante, animais_df):
     """Calcula a similaridade de cosseno ponderada para cada animal."""
@@ -304,6 +354,7 @@ def page_editar_dados(table_name, title):
     peso_tamanho_key = f"edit_peso_tamanho_{table_name}"
     peso_moradia_key = f"edit_peso_moradia_{table_name}"
 
+
     if data:
         # Se for uma nova busca (ou a primeira), carrega os dados no session_state
         if id_key not in st.session_state or st.session_state[id_key] != data['id']:
@@ -400,7 +451,45 @@ def page_editar_dados(table_name, title):
             if key in st.session_state:
                 del st.session_state[key]
 
-# --- PÁGINA DE COMPATIBILIDADE (NOVA) ---
+# --- PÁGINA DE UPLOAD CSV (NOVA) ---
+
+def page_upload_csv():
+    """Página para substituir dados da tabela por um arquivo CSV."""
+    st.title("Acrescentar arquivos CSV")
+    st.warning("ATENÇÃO: Fazer o upload de um arquivo aqui apagará TODOS os dados atuais da tabela correspondente e os substituirá pelo conteúdo do CSV.")
+
+    st.markdown("---")
+    
+    # Seção para ANIMAIS
+    st.subheader("Substituir Tabela de Animais")
+    st.info("O CSV deve conter as colunas: nome, tamanho, codigo_tamanho, moradia, codigo_moradia")
+    uploader_animais = st.file_uploader("Selecione um CSV para a tabela 'animais'", type="csv", key="uploader_animais")
+    
+    if uploader_animais:
+        # Adiciona um botão de confirmação antes da ação destrutiva
+        if st.button("Confirmar Substituição - ANIMAIS"):
+            replace_table_from_csv("animais", uploader_animais)
+            # Limpa o uploader após a execução
+            st.session_state.uploader_animais = None
+            st.rerun()
+
+    st.markdown("---")
+
+    # Seção para ADOTANTES
+    st.subheader("Substituir Tabela de Adotantes")
+    st.info("O CSV deve conter as colunas: nome, tamanho, codigo_tamanho, moradia, codigo_moradia, peso_tamanho, peso_moradia")
+    uploader_adotantes = st.file_uploader("Selecione um CSV para a tabela 'adotantes'", type="csv", key="uploader_adotantes")
+    
+    if uploader_adotantes:
+         # Adiciona um botão de confirmação
+        if st.button("Confirmar Substituição - ADOTANTES"):
+            replace_table_from_csv("adotantes", uploader_adotantes)
+            # Limpa o uploader após a execução
+            st.session_state.uploader_adotantes = None
+            st.rerun()
+
+
+# --- PÁGINA DE COMPATIBILIDADE ---
 
 def page_compatibilidade():
     """Página para calcular e exibir animais compatíveis com um adotante."""
@@ -471,24 +560,29 @@ init_db()
 st.sidebar.title("Navegação da Aplicação")
 st.sidebar.info("Sistema de Gerenciamento de Adoções")
 
+# Dicionário de páginas com a nova ordem
 paginas = {
-    "Animais compatíveis": "page_compatibilidade", # NOVA PÁGINA
     "Ver tabela de adotantes": "page_ver_adotantes",
     "Ver tabela de animais": "page_ver_animais",
+    "Acrescentar arquivos CSV": "page_upload_csv", # NOVA PÁGINA
     "Formulário do adotante": "page_form_adotante",
     "Formulário do animal": "page_form_animal",
     "Editar dados do adotante": "page_edit_adotante",
-    "Editar dados do animal": "page_edit_animal"
+    "Editar dados do animal": "page_edit_animal",
+    "Animais compatíveis": "page_compatibilidade" # MOVDA PARA O FIM
 }
 
 escolha = st.sidebar.radio("Escolha uma página:", list(paginas.keys()))
 
-# Roteamento
+# Roteamento (atualizado para a nova ordem)
 if escolha == "Ver tabela de adotantes":
     page_ver_tabela("adotantes", "Ver Tabela de Adotantes")
 
 elif escolha == "Ver tabela de animais":
     page_ver_tabela("animais", "Ver Tabela de Animais")
+
+elif escolha == "Acrescentar arquivos CSV": # NOVO ROTEAMENTO
+    page_upload_csv()
 
 elif escolha == "Formulário do adotante":
     page_formulario(
@@ -514,5 +608,5 @@ elif escolha == "Editar dados do adotante":
 elif escolha == "Editar dados do animal":
     page_editar_dados("animais", "Editar Dados do Animal")
 
-elif escolha == "Animais compatíveis": # NOVO ROTEAMENTO
+elif escolha == "Animais compatíveis":
     page_compatibilidade()
