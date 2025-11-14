@@ -1,25 +1,92 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
-import math  # Importado para a raiz quadrada (sqrt)
+import math
 
 # --- Configuração do Banco de Dados ---
 DB_NAME = "adocoes.db"
 
-# --- Mapeamentos One-Hot Consistentes ---
-TAMANHO_MAP = {
-    'pequeno': '100',
-    'médio': '010',
-    'grande': '001'
-}
-MORADIA_MAP = {
-    'casa': '10',
-    'apartamento': '01'
+# --- Mapeamentos One-Hot Consistentes (11 CARACTERÍSTICAS) ---
+
+# Dicionário mestre de todas as características, seus mapas e perguntas
+# Isso centraliza a lógica e facilita a adição de novas características no futuro.
+
+CARACTERISTICAS = {
+    'tipo': {
+        'map': {'cão': '10', 'gato': '01'},
+        'q_adotante': 'Qual tipo de animal mais te interessa?',
+        'q_animal': 'Tipo de animal:'
+    },
+    'tamanho': {
+        'map': {'pequeno': '100', 'médio': '010', 'grande': '001'},
+        'q_adotante': 'Que tamanho de animal você prefere?',
+        'q_animal': 'Porte do animal:'
+    },
+    'moradia': {
+        # Mantido conforme formulário do adotante, mesmo não estando na lista de 10
+        'map': {'casa': '10', 'apartamento': '01'},
+        'q_adotante': 'Qual tipo da sua moradia?',
+        'q_animal': 'Moradia ideal:' # Pergunta inferida para animais
+    },
+    'pelo': {
+        'map': {'longos': '10', 'curtos': '01'},
+        'q_adotante': 'Que tipo de pelo você prefere?',
+        'q_animal': 'Pelagem:'
+    },
+    'sexo': {
+        'map': {'macho': '10', 'fêmea': '01'},
+        'q_adotante': 'Você prefere animal macho ou fêmea?',
+        'q_animal': 'Sexo:'
+    },
+    'queda': {
+        'map': {'sim': '10', 'não': '01'},
+        'q_adotante': 'Queda de pelo te incomoda? (sim=incomoda, não=ok)',
+        'q_animal': 'Apresenta queda de pelo:'
+    },
+    'crianca': {
+        'map': {'sim': '10', 'não': '01'},
+        'q_adotante': 'O animal deve ser amigável com criança?',
+        'q_animal': 'Amigável com criança:'
+    },
+    'brincalhao': {
+        'map': {'sim': '10', 'não': '01'},
+        'q_adotante': 'O animal deve ser brincalhão?',
+        'q_animal': 'Brincalhão:'
+    },
+    'ativo': {
+        'map': {'sim': '10', 'não': '01'},
+        'q_adotante': 'O animal deve ter muita disposição?',
+        'q_animal': 'Muito ativo:'
+    },
+    'guarda': {
+        'map': {'sim': '10', 'não': '01'},
+        'q_adotante': 'O animal precisa servir para guarda?',
+        'q_animal': 'Serve para guarda:'
+    },
+    'late': {
+        'map': {'sim': '10', 'não': '01'},
+        'q_adotante': 'É positivo o animal latir?',
+        'q_animal': 'Tende a latir:'
+    }
 }
 
-# Opções para os formulários
-TAMANHO_OPTIONS = list(TAMANHO_MAP.keys())
-MORADIA_OPTIONS = list(MORADIA_MAP.keys())
+# Gera listas de opções a partir dos mapas
+for k in CARACTERISTICAS:
+    CARACTERISTICAS[k]['options'] = list(CARACTERISTICAS[k]['map'].keys())
+
+# Nomes das colunas no DB
+COLUNAS_FEATURES = list(CARACTERISTICAS.keys())
+COLUNAS_CODIGO = [f"codigo_{k}" for k in COLUNAS_FEATURES]
+COLUNAS_PESO = [f"peso_{k}" for k in COLUNAS_FEATURES]
+
+# Colunas totais para cada tabela
+COLUNAS_ANIMAIS = ['id', 'nome'] + COLUNAS_FEATURES + COLUNAS_CODIGO
+COLUNAS_ADOTANTES = ['id', 'nome', 'contato'] + COLUNAS_FEATURES + COLUNAS_CODIGO + COLUNAS_PESO
+
+# Colunas necessárias para CSV (sem ID)
+CSV_COLS_ANIMAIS = [col for col in COLUNAS_ANIMAIS if col != 'id']
+CSV_COLS_ADOTANTES = [col for col in COLUNAS_ADOTANTES if col != 'id']
+
 
 def get_db_connection():
     """Cria e retorna uma conexão com o banco de dados SQLite."""
@@ -28,68 +95,125 @@ def get_db_connection():
     return conn
 
 def init_db():
-    """Inicializa o banco de dados e cria as tabelas se não existirem."""
+    """
+    Inicializa o banco de dados e executa a migração, adicionando colunas
+    que não existem sem apagar dados.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # Tabela de Adotantes
+
+    # --- Tabela Adotantes ---
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS adotantes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL UNIQUE,
-        tamanho TEXT NOT NULL,
-        codigo_tamanho TEXT NOT NULL,
-        moradia TEXT NOT NULL,
-        codigo_moradia TEXT NOT NULL,
-        peso_tamanho TEXT NOT NULL,
-        peso_moradia TEXT NOT NULL
+        nome TEXT NOT NULL UNIQUE
     );
     ''')
     
-    # Tabela de Animais
+    # Pega colunas existentes
+    cursor.execute("PRAGMA table_info(adotantes)")
+    existing_cols_adotantes = [col['name'] for col in cursor.fetchall()]
+
+    # Define colunas necessárias (Nome já existe)
+    required_cols_adotantes = {
+        "contato": "TEXT",
+    }
+    # Adiciona features, códigos e pesos
+    for feature in COLUNAS_FEATURES:
+        map = CARACTERISTICAS[feature]['map']
+        # Define valor padrão para pesos (ex: '55' ou '555')
+        default_peso = str(5) * len(list(map.values())[0]) 
+        
+        required_cols_adotantes[feature] = "TEXT"
+        required_cols_adotantes[f"codigo_{feature}"] = "TEXT"
+        required_cols_adotantes[f"peso_{feature}"] = f"TEXT DEFAULT '{default_peso}'" # Adiciona default
+
+    # Adiciona colunas faltantes para Adotantes
+    for col, type in required_cols_adotantes.items():
+        if col not in existing_cols_adotantes:
+            try:
+                cursor.execute(f"ALTER TABLE adotantes ADD COLUMN {col} {type}")
+                st.info(f"Coluna '{col}' adicionada à tabela 'adotantes'.")
+            except sqlite3.OperationalError as e:
+                st.warning(f"Não foi possível adicionar coluna {col}: {e}")
+
+    # --- Tabela Animais ---
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS animais (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL UNIQUE,
-        tamanho TEXT NOT NULL,
-        codigo_tamanho TEXT NOT NULL,
-        moradia TEXT NOT NULL,
-        codigo_moradia TEXT NOT NULL
+        nome TEXT NOT NULL UNIQUE
     );
     ''')
+
+    # Pega colunas existentes
+    cursor.execute("PRAGMA table_info(animais)")
+    existing_cols_animais = [col['name'] for col in cursor.fetchall()]
+
+    # Define colunas necessárias (Nome já existe)
+    required_cols_animais = {}
+    for feature in COLUNAS_FEATURES:
+        required_cols_animais[feature] = "TEXT"
+        required_cols_animais[f"codigo_{feature}"] = "TEXT"
+
+    # Adiciona colunas faltantes para Animais
+    for col, type in required_cols_animais.items():
+        if col not in existing_cols_animais:
+            try:
+                cursor.execute(f"ALTER TABLE animais ADD COLUMN {col} {type}")
+                st.info(f"Coluna '{col}' adicionada à tabela 'animais'.")
+            except sqlite3.OperationalError as e:
+                st.warning(f"Não foi possível adicionar coluna {col}: {e}")
     
     conn.commit()
     conn.close()
 
 # --- Funções CRUD (Create, Read, Update, Delete) ---
 
-def add_data(table_name, nome, tamanho, moradia, peso_tamanho=None, peso_moradia=None):
-    """Adiciona um novo registro ao banco de dados."""
+def add_data(table_name, data):
+    """Adiciona um novo registro ao banco de dados usando um dicionário de dados."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
-        codigo_tamanho = TAMANHO_MAP[tamanho]
-        codigo_moradia = MORADIA_MAP[moradia]
+        cols = []
+        params = []
         
+        # Adiciona nome e contato (se adotante)
+        cols.append('nome')
+        params.append(data['nome'])
         if table_name == 'adotantes':
-            # Processa os pesos para o formato de string repetida
-            peso_tamanho_str = str(peso_tamanho) * len(codigo_tamanho)
-            peso_moradia_str = str(peso_moradia) * len(codigo_moradia)
+            cols.append('contato')
+            params.append(data['contato'])
+
+        # Processa todas as características
+        for feature in COLUNAS_FEATURES:
+            valor = data[feature]
+            codigo = CARACTERISTICAS[feature]['map'][valor]
             
-            query = f"INSERT INTO {table_name} (nome, tamanho, codigo_tamanho, moradia, codigo_moradia, peso_tamanho, peso_moradia) VALUES (?, ?, ?, ?, ?, ?, ?)"
-            params = (nome, tamanho, codigo_tamanho, moradia, codigo_moradia, peso_tamanho_str, peso_moradia_str)
-        
-        else: # 'animais'
-            query = f"INSERT INTO {table_name} (nome, tamanho, codigo_tamanho, moradia, codigo_moradia) VALUES (?, ?, ?, ?, ?)"
-            params = (nome, tamanho, codigo_tamanho, moradia, codigo_moradia)
+            cols.append(feature)
+            cols.append(f"codigo_{feature}")
+            params.append(valor)
+            params.append(codigo)
+            
+            # Adiciona pesos se for adotante
+            if table_name == 'adotantes':
+                peso = data[f"peso_{feature}"]
+                peso_str = str(peso) * len(codigo) # ex: 8 * '100' -> '888'
+                
+                cols.append(f"peso_{feature}")
+                params.append(peso_str)
+
+        # Constrói a query
+        cols_str = ", ".join(cols)
+        placeholders = ", ".join(["?"] * len(params))
+        query = f"INSERT INTO {table_name} ({cols_str}) VALUES ({placeholders})"
 
         cursor.execute(query, params)
         conn.commit()
-        st.success(f"Registro '{nome}' adicionado com sucesso à tabela '{table_name}'!")
+        st.success(f"Registro '{data['nome']}' adicionado com sucesso à tabela '{table_name}'!")
     
     except sqlite3.IntegrityError:
-        st.error(f"Erro: O nome '{nome}' já existe na tabela '{table_name}'.")
+        st.error(f"Erro: O nome '{data['nome']}' já existe na tabela '{table_name}'.")
     except Exception as e:
         st.error(f"Ocorreu um erro: {e}")
     finally:
@@ -99,25 +223,14 @@ def get_all_data(table_name):
     """Busca todos os registros de uma tabela e retorna como DataFrame."""
     conn = get_db_connection()
     try:
-        # Verifica se a tabela 'adotantes' já tem as colunas de peso
-        if table_name == 'adotantes':
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA table_info(adotantes)")
-            columns = [col['name'] for col in cursor.fetchall()]
-            if 'peso_tamanho' not in columns or 'peso_moradia' not in columns:
-                # Se não tiver, adiciona (migração simples)
-                st.warning("Atualizando esquema do banco de dados para adotantes...")
-                try:
-                    cursor.execute("ALTER TABLE adotantes ADD COLUMN peso_tamanho TEXT DEFAULT '555'")
-                    cursor.execute("ALTER TABLE adotantes ADD COLUMN peso_moradia TEXT DEFAULT '55'")
-                    conn.commit()
-                    st.info("Esquema atualizado. Registros antigos têm peso '5' por padrão.")
-                except sqlite3.OperationalError as e:
-                    # Ignora se a coluna já existe
-                    if "duplicate column name" not in str(e):
-                        raise e
-
         df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+        
+        # Garante a ordem correta das colunas
+        if table_name == 'animais':
+            df = df.reindex(columns=COLUNAS_ANIMAIS, fill_value=None)
+        elif table_name == 'adotantes':
+            df = df.reindex(columns=COLUNAS_ADOTANTES, fill_value=None)
+            
         return df
     except Exception as e:
         st.error(f"Erro ao ler dados: {e}")
@@ -134,33 +247,53 @@ def find_data_by_name(table_name, nome):
     conn.close()
     return data 
 
-def update_data(table_name, id, nome, tamanho, moradia, peso_tamanho=None, peso_moradia=None):
+def update_data(table_name, id, data):
     """Atualiza um registro existente no banco de dados."""
     conn = get_db_connection()
     cursor = conn.cursor()
     
     try:
-        codigo_tamanho = TAMANHO_MAP[tamanho]
-        codigo_moradia = MORADIA_MAP[moradia]
-        
+        set_parts = []
+        params = []
+
+        # Adiciona nome e contato (se adotante)
+        set_parts.append('nome = ?')
+        params.append(data['nome'])
         if table_name == 'adotantes':
-            # Processa os pesos
-            peso_tamanho_str = str(peso_tamanho) * len(codigo_tamanho)
-            peso_moradia_str = str(peso_moradia) * len(codigo_moradia)
+            set_parts.append('contato = ?')
+            params.append(data['contato'])
+
+        # Processa todas as características
+        for feature in COLUNAS_FEATURES:
+            valor = data[feature]
+            codigo = CARACTERISTICAS[feature]['map'][valor]
             
-            query = f"UPDATE {table_name} SET nome = ?, tamanho = ?, codigo_tamanho = ?, moradia = ?, codigo_moradia = ?, peso_tamanho = ?, peso_moradia = ? WHERE id = ?"
-            params = (nome, tamanho, codigo_tamanho, moradia, codigo_moradia, peso_tamanho_str, peso_moradia_str, id)
+            set_parts.append(f"{feature} = ?")
+            set_parts.append(f"codigo_{feature} = ?")
+            params.append(valor)
+            params.append(codigo)
+            
+            # Adiciona pesos se for adotante
+            if table_name == 'adotantes':
+                peso = data[f"peso_{feature}"]
+                peso_str = str(peso) * len(codigo) # ex: 8 * '100' -> '888'
+                
+                set_parts.append(f"peso_{feature} = ?")
+                params.append(peso_str)
         
-        else: # 'animais'
-            query = f"UPDATE {table_name} SET nome = ?, tamanho = ?, codigo_tamanho = ?, moradia = ?, codigo_moradia = ? WHERE id = ?"
-            params = (nome, tamanho, codigo_tamanho, moradia, codigo_moradia, id)
+        # Adiciona o ID no final para o WHERE
+        params.append(id)
+        
+        # Constrói a query
+        set_str = ", ".join(set_parts)
+        query = f"UPDATE {table_name} SET {set_str} WHERE id = ?"
         
         cursor.execute(query, params)
         conn.commit()
-        st.success(f"Registro '{nome}' (ID: {id}) atualizado com sucesso!")
+        st.success(f"Registro '{data['nome']}' (ID: {id}) atualizado com sucesso!")
         
     except sqlite3.IntegrityError:
-         st.error(f"Erro: O nome '{nome}' já existe na tabela '{table_name}'.")
+         st.error(f"Erro: O nome '{data['nome']}' já existe na tabela '{table_name}'.")
     except Exception as e:
         st.error(f"Ocorreu um erro ao atualizar: {e}")
     finally:
@@ -174,14 +307,14 @@ def replace_table_from_csv(table_name, uploaded_file):
     
     # Define as colunas obrigatórias para cada tabela
     if table_name == 'animais':
-        required_cols = ['nome', 'tamanho', 'codigo_tamanho', 'moradia', 'codigo_moradia']
+        required_cols = CSV_COLS_ANIMAIS
     elif table_name == 'adotantes':
-        required_cols = ['nome', 'tamanho', 'codigo_tamanho', 'moradia', 'codigo_moradia', 'peso_tamanho', 'peso_moradia']
+        required_cols = CSV_COLS_ADOTANTES
     else:
         return (False, f"Tabela '{table_name}' desconhecida.")
 
     try:
-        df = pd.read_csv(uploaded_file)
+        df = pd.read_csv(uploaded_file, dtype=str) # Lê tudo como string
         
         # 1. Validação: Verifica se todas as colunas necessárias existem no CSV
         if not all(col in df.columns for col in required_cols):
@@ -230,10 +363,13 @@ def calculate_scores(adotante, animais_df):
     
     try:
         # 1. Preparar vetores do Adotante (B e P)
-        vetor_b_str = adotante['codigo_tamanho'] + adotante['codigo_moradia']
-        vetor_p_str = adotante['peso_tamanho'] + adotante['peso_moradia']
+        vetor_b_str = ""
+        vetor_p_str = ""
+        for feature in COLUNAS_FEATURES:
+            vetor_b_str += adotante[f"codigo_{feature}"]
+            vetor_p_str += adotante[f"peso_{feature}"]
         
-        # Converte strings '10010' e '33388' para listas de inteiros
+        # Converte strings '1010010...' e '8855522...' para listas de inteiros
         B = [int(digit) for digit in vetor_b_str]
         P = [int(digit) for digit in vetor_p_str]
         
@@ -249,20 +385,20 @@ def calculate_scores(adotante, animais_df):
         for _, animal in animais_df.iterrows():
             
             # 3.1 Preparar vetor do Animal (A)
-            vetor_a_str = animal['codigo_tamanho'] + animal['codigo_moradia']
+            vetor_a_str = ""
+            for feature in COLUNAS_FEATURES:
+                vetor_a_str += animal[f"codigo_{feature}"]
             A = [int(digit) for digit in vetor_a_str]
             
             # Garantia de que os vetores têm o mesmo tamanho
             if len(A) != len(B):
-                st.error(f"Incompatibilidade de vetores entre adotante {adotante['nome']} e animal {animal['nome']}.")
+                st.error(f"Incompatibilidade de vetores (A:{len(A)}, B:{len(B)}) entre adotante {adotante['nome']} e animal {animal['nome']}.")
                 continue
                 
             numerador = 0
             sum_Ai_Pi_sq = 0 # Para o Termo 1 do Denominador
             
             # 3.2 Calcular Numerador e Termo 1 do Denominador
-            # Numerador = Σ(Ai * Bi * Pi)
-            # Termo 1 = √Σ(Ai * Pi)²
             for i in range(len(A)):
                 ai = A[i]
                 bi = B[i]
@@ -290,6 +426,7 @@ def calculate_scores(adotante, animais_df):
 
     except Exception as e:
         st.error(f"Erro ao calcular scores: {e}")
+        st.exception(e) # Mostra mais detalhes do erro
         return []
 
 
@@ -298,6 +435,12 @@ def calculate_scores(adotante, animais_df):
 @st.cache_data
 def convert_df_to_csv(df):
     """Converte um DataFrame para CSV em memória, pronto para download."""
+    # Garante que o df baixado tenha a ordem correta de colunas
+    if 'contato' in df.columns: # É adotante
+         df = df.reindex(columns=CSV_COLS_ADOTANTES, fill_value=None)
+    else: # É animal
+         df = df.reindex(columns=CSV_COLS_ANIMAIS, fill_value=None)
+         
     return df.to_csv(index=False).encode('utf-8')
 
 
@@ -312,38 +455,49 @@ def page_ver_tabela(table_name, title):
     else:
         st.dataframe(df)
 
-def page_formulario(table_name, title, q_nome, q_tamanho, q_moradia):
+def page_formulario(table_name, title):
     """Página de formulário para adicionar novos registros."""
     st.title(title)
     
     with st.form(key=f"form_{table_name}"):
         st.subheader("Por favor, preencha os dados:")
         
-        nome = st.text_input(q_nome)
+        # Dicionário para coletar os dados
+        data = {}
         
-        # --- Tamanho ---
-        tamanho = st.selectbox(q_tamanho, options=TAMANHO_OPTIONS)
-        # SÓ MOSTRA SLIDER PARA ADOTANTES
         if table_name == 'adotantes':
-            peso_tamanho = st.slider(f"Qual o peso (0-10) para: '{q_tamanho}'?", 0, 10, 5)
-        
-        # --- Moradia ---
-        moradia = st.selectbox(q_moradia, options=MORADIA_OPTIONS)
-        # SÓ MOSTRA SLIDER PARA ADOTANTES
-        if table_name == 'adotantes':
-            peso_moradia = st.slider(f"Qual o peso (0-10) para: '{q_moradia}'?", 0, 10, 5)
+            data['nome'] = st.text_input("Nome:")
+            data['contato'] = st.text_input("Contato (Telefone/Email):")
+        else: # 'animais'
+            data['nome'] = st.text_input("Nome do animal:")
+
+        st.markdown("---")
+        st.subheader("Características")
+
+        # Gera os widgets para todas as características
+        for feature, props in CARACTERISTICAS.items():
+            
+            if table_name == 'adotantes':
+                q = props['q_adotante']
+            else:
+                q = props['q_animal']
+                
+            data[feature] = st.selectbox(q, options=props['options'])
+            
+            # SÓ MOSTRA SLIDER PARA ADOTANTES
+            if table_name == 'adotantes':
+                data[f"peso_{feature}"] = st.slider(f"Peso (0-10) para: '{props['q_adotante']}'", 0, 10, 5, key=f"peso_{feature}")
+            
+            st.divider()
 
         
         submitted = st.form_submit_button("Enviar")
         
         if submitted:
-            if not nome:
+            if not data['nome']:
                 st.warning("O campo 'nome' é obrigatório.")
             else:
-                if table_name == 'adotantes':
-                    add_data(table_name, nome, tamanho, moradia, peso_tamanho, peso_moradia)
-                else: # 'animais'
-                    add_data(table_name, nome, tamanho, moradia)
+                add_data(table_name, data)
 
 def page_editar_dados(table_name, title):
     """Página para editar registros existentes."""
@@ -355,99 +509,123 @@ def page_editar_dados(table_name, title):
         st.info("Digite um nome para iniciar a busca.")
         return
 
-    data = find_data_by_name(table_name, search_name)
+    db_data = find_data_by_name(table_name, search_name)
     
-    # Define chaves únicas para o session_state
+    # Chave única para o ID no session_state
     id_key = f"edit_id_{table_name}"
-    nome_key = f"edit_nome_{table_name}"
-    tamanho_key = f"edit_tamanho_{table_name}"
-    moradia_key = f"edit_moradia_{table_name}"
-    
-    # Novas chaves para pesos (só para adotantes)
-    peso_tamanho_key = f"edit_peso_tamanho_{table_name}"
-    peso_moradia_key = f"edit_peso_moradia_{table_name}"
 
-
-    if data:
+    if db_data:
         # Se for uma nova busca (ou a primeira), carrega os dados no session_state
-        if id_key not in st.session_state or st.session_state[id_key] != data['id']:
-            st.session_state[id_key] = data['id']
-            st.session_state[nome_key] = data['nome']
-            st.session_state[tamanho_key] = data['tamanho']
-            st.session_state[moradia_key] = data['moradia']
+        if id_key not in st.session_state or st.session_state[id_key] != db_data['id']:
+            st.session_state[id_key] = db_data['id']
+            st.session_state[f"edit_nome_{table_name}"] = db_data['nome']
             
-            # Carrega os pesos SÓ SE for adotante
             if table_name == 'adotantes':
-                # Decodifica o peso: '888' -> 8, '55' -> 5
-                st.session_state[peso_tamanho_key] = int(data['peso_tamanho'][0]) 
-                st.session_state[peso_moradia_key] = int(data['peso_moradia'][0])
+                st.session_state[f"edit_contato_{table_name}"] = db_data['contato']
+            
+            # Carrega todas as features e pesos (se adotante)
+            for feature in COLUNAS_FEATURES:
+                st.session_state[f"edit_{feature}_{table_name}"] = db_data[feature]
+                if table_name == 'adotantes':
+                    # Decodifica o peso: '888' -> 8, '55' -> 5
+                    peso_str = db_data[f"peso_{feature}"]
+                    st.session_state[f"edit_peso_{feature}_{table_name}"] = int(peso_str[0]) if peso_str else 5
 
-            st.rerun()
+            st.rerun() # Recarrega para os widgets usarem o state
 
-        st.info(f"Editando dados de: {st.session_state[nome_key]} (ID: {st.session_state[id_key]})")
+        st.info(f"Editando dados de: {st.session_state[f'edit_nome_{table_name}']} (ID: {st.session_state[id_key]})")
         
         with st.form(key=f"edit_form_{table_name}"):
             st.subheader("Atualize os campos necessários:")
             
-            try:
-                tamanho_index = TAMANHO_OPTIONS.index(st.session_state[tamanho_key])
-            except ValueError:
-                tamanho_index = 0 
-            try:
-                moradia_index = MORADIA_OPTIONS.index(st.session_state[moradia_key])
-            except ValueError:
-                moradia_index = 0
+            # Dicionário para coletar dados do form
+            form_data = {}
+            
+            # --- Campos Principais ---
+            if table_name == 'adotantes':
+                form_data['nome'] = st.text_input("Nome", key=f"edit_nome_{table_name}")
+                form_data['contato'] = st.text_input("Contato", key=f"edit_contato_{table_name}")
+            else: # 'animais'
+                form_data['nome'] = st.text_input("Nome", key=f"edit_nome_{table_name}")
 
-            # Widgets bindeados ao session_state
-            nome = st.text_input("Nome", key=nome_key)
+            st.markdown("---")
+            st.subheader("Características")
             
-            # --- Tamanho ---
-            tamanho = st.selectbox("Tamanho", options=TAMANHO_OPTIONS, index=tamanho_index, key=tamanho_key)
-            if table_name == 'adotantes':
-                peso_tamanho = st.slider("Peso Tamanho", 0, 10, key=peso_tamanho_key)
-            
-            # --- Moradia ---
-            moradia = st.selectbox("Moradia", options=MORADIA_OPTIONS, index=moradia_index, key=moradia_key)
-            if table_name == 'adotantes':
-                peso_moradia = st.slider("Peso Moradia", 0, 10, key=peso_moradia_key)
+            auto_codes = {}
+
+            # --- Campos de Características ---
+            for feature, props in CARACTERISTICAS.items():
+                
+                # Define a chave e a pergunta
+                key = f"edit_{feature}_{table_name}"
+                if table_name == 'adotantes':
+                    q = props['q_adotante']
+                else:
+                    q = props['q_animal']
+
+                # Encontra o índice da opção salva
+                try:
+                    index = props['options'].index(st.session_state[key])
+                except (ValueError, KeyError):
+                    index = 0
+                
+                # Widget de Selectbox
+                form_data[feature] = st.selectbox(q, options=props['options'], index=index, key=key)
+                
+                # Widget de Slider (só para adotantes)
+                if table_name == 'adotantes':
+                    peso_key = f"edit_peso_{feature}_{table_name}"
+                    form_data[f"peso_{feature}"] = st.slider(f"Peso (0-10) para: '{q}'", 0, 10, key=peso_key)
+
+                # Guarda o código para exibir
+                auto_codes[feature] = CARACTERISTICAS[feature]['map'].get(st.session_state[key], "Inválido")
+                st.divider()
 
 
             st.markdown("---")
             st.subheader("Campos automáticos (não editáveis)")
             
-            st.text_input("Código Tamanho (auto)", 
-                           value=TAMANHO_MAP.get(st.session_state[tamanho_key], "Inválido"), 
-                           disabled=True)
-            st.text_input("Código Moradia (auto)", 
-                           value=MORADIA_MAP.get(st.session_state[moradia_key], "Inválido"), 
-                           disabled=True)
+            # Exibe todos os códigos automáticos
+            cols_auto = st.columns(3)
+            col_index = 0
+            for feature, code in auto_codes.items():
+                with cols_auto[col_index]:
+                    st.text_input(f"Código {feature}", value=code, disabled=True)
+                col_index = (col_index + 1) % 3
+
 
             submitted = st.form_submit_button("Atualizar")
 
             if submitted:
-                # Na submissão, lê os valores do session_state
+                # Na submissão, lê os valores do session_state (que foram atualizados pelo form)
+                # e os coloca no dicionário 'data' para a função de update
+                data_to_update = {}
+                data_to_update['nome'] = st.session_state[f"edit_nome_{table_name}"]
+                
                 if table_name == 'adotantes':
-                    update_data(
-                        table_name,
-                        st.session_state[id_key],
-                        st.session_state[nome_key],
-                        st.session_state[tamanho_key],
-                        st.session_state[moradia_key],
-                        st.session_state[peso_tamanho_key], # Passa o peso
-                        st.session_state[peso_moradia_key]  # Passa o peso
-                    )
-                else: # 'animais'
-                     update_data(
-                        table_name,
-                        st.session_state[id_key],
-                        st.session_state[nome_key],
-                        st.session_state[tamanho_key],
-                        st.session_state[moradia_key]
-                    )
+                    data_to_update['contato'] = st.session_state[f"edit_contato_{table_name}"]
 
-                # Limpa o state após η atualização
-                keys_to_clear = [id_key, nome_key, tamanho_key, moradia_key, 
-                                 peso_tamanho_key, peso_moradia_key]
+                for feature in COLUNAS_FEATURES:
+                    data_to_update[feature] = st.session_state[f"edit_{feature}_{table_name}"]
+                    if table_name == 'adotantes':
+                         data_to_update[f"peso_{feature}"] = st.session_state[f"edit_peso_{feature}_{table_name}"]
+
+                update_data(
+                    table_name,
+                    st.session_state[id_key],
+                    data_to_update
+                )
+
+                # Limpa o state após a atualização
+                keys_to_clear = [id_key, f"edit_nome_{table_name}"]
+                if table_name == 'adotantes':
+                    keys_to_clear.append(f"edit_contato_{table_name}")
+                
+                for feature in COLUNAS_FEATURES:
+                    keys_to_clear.append(f"edit_{feature}_{table_name}")
+                    if table_name == 'adotantes':
+                        keys_to_clear.append(f"edit_peso_{feature}_{table_name}")
+
                 for key in keys_to_clear:
                     if key in st.session_state:
                         del st.session_state[key]
@@ -458,13 +636,21 @@ def page_editar_dados(table_name, title):
     else:
         st.warning(f"Nenhum registro encontrado com o nome: '{search_name}'")
         # Limpa o state se o nome não for encontrado
-        keys_to_clear = [id_key, nome_key, tamanho_key, moradia_key, 
-                         peso_tamanho_key, peso_moradia_key]
+        keys_to_clear = [id_key, f"edit_nome_{table_name}"]
+        if table_name == 'adotantes':
+            keys_to_clear.append(f"edit_contato_{table_name}")
+        
+        for feature in COLUNAS_FEATURES:
+            keys_to_clear.append(f"edit_{feature}_{table_name}")
+            if table_name == 'adotantes':
+                keys_to_clear.append(f"edit_peso_{feature}_{table_name}")
+
         for key in keys_to_clear:
             if key in st.session_state:
                 del st.session_state[key]
 
-# --- PÁGINA DE UPLOAD CSV (CORRIGIDA) ---
+
+# --- PÁGINA DE UPLOAD CSV ---
 
 def page_upload_csv():
     """Página para substituir dados da tabela por um arquivo CSV."""
@@ -485,14 +671,12 @@ def page_upload_csv():
     
     # Seção para ANIMAIS
     st.subheader("Substituir Tabela de Animais")
-    st.info("O CSV deve conter as colunas: nome, tamanho, codigo_tamanho, moradia, codigo_moradia")
+    st.info(f"O CSV deve conter as colunas: {', '.join(CSV_COLS_ANIMAIS)}")
     uploader_animais = st.file_uploader("Selecione um CSV para a tabela 'animais'", type="csv", key="uploader_animais")
     
     if uploader_animais:
-        # Adiciona um botão de confirmação antes da ação destrutiva
         if st.button("Confirmar Substituição - ANIMAIS"):
             success, message = replace_table_from_csv("animais", uploader_animais)
-            # Armazena a mensagem no state e recarrega a página
             if success:
                 st.session_state["csv_message"] = ("success", message)
             else:
@@ -503,14 +687,12 @@ def page_upload_csv():
 
     # Seção para ADOTANTES
     st.subheader("Substituir Tabela de Adotantes")
-    st.info("O CSV deve conter as colunas: nome, tamanho, codigo_tamanho, moradia, codigo_moradia, peso_tamanho, peso_moradia")
+    st.info(f"O CSV deve conter as colunas: {', '.join(CSV_COLS_ADOTANTES)}")
     uploader_adotantes = st.file_uploader("Selecione um CSV para a tabela 'adotantes'", type="csv", key="uploader_adotantes")
     
     if uploader_adotantes:
-         # Adiciona um botão de confirmação
-        if st.button("Confirmar Substituição - ADOTANTES"):
+         if st.button("Confirmar Substituição - ADOTANTES"):
             success, message = replace_table_from_csv("adotantes", uploader_adotantes)
-            # Armazena a mensagem no state e recarrega a página
             if success:
                 st.session_state["csv_message"] = ("success", message)
             else:
@@ -518,7 +700,7 @@ def page_upload_csv():
             st.rerun()
 
 
-# --- PÁGINA DE DOWNLOAD CSV (NOVA) ---
+# --- PÁGINA DE DOWNLOAD CSV ---
 
 def page_baixar_csv():
     """Página para baixar as tabelas 'animais' e 'adotantes' como CSV."""
@@ -573,8 +755,17 @@ def page_compatibilidade():
         return
         
     st.success(f"Calculando compatibilidade para: **{adotante['nome']}**")
-    st.write(f"Preferências: {adotante['tamanho']} (peso {adotante['peso_tamanho'][0]}), {adotante['moradia']} (peso {adotante['peso_moradia'][0]})")
     
+    # Exibe as preferências do adotante
+    with st.expander("Ver preferências e pesos do Adotante"):
+        cols = st.columns(3)
+        i = 0
+        for feature in COLUNAS_FEATURES:
+            with cols[i % 3]:
+                st.write(f"**{feature.capitalize()}**: {adotante[feature]}")
+                st.caption(f"Peso: {adotante[f'peso_{feature}'][0]}")
+            i += 1
+            
     # 2. Buscar TODOS os animais
     animais_df = get_all_data("animais")
     if animais_df.empty:
@@ -589,7 +780,6 @@ def page_compatibilidade():
         return
 
     # 4. Aplicar a lógica de exibição (Top 10 + empates)
-    
     resultado_final = []
     
     if len(sorted_scores) <= 10:
@@ -605,9 +795,7 @@ def page_compatibilidade():
     # 5. Exibir os resultados
     st.subheader(f"Lista de {len(resultado_final)} Animais Mais Compatíveis:")
     
-    # Converte para DataFrame para exibição bonita
     df_resultado = pd.DataFrame(resultado_final)
-    # Ajusta o índice para começar em 1 (ranking)
     df_resultado.index = df_resultado.index + 1
     
     st.dataframe(
@@ -629,7 +817,7 @@ paginas = {
     "Ver tabela de adotantes": "page_ver_adotantes",
     "Ver tabela de animais": "page_ver_animais",
     "Acrescentar arquivos CSV": "page_upload_csv",
-    "Baixar arquivos CSV": "page_baixar_csv", # NOVA PÁGINA
+    "Baixar arquivos CSV": "page_baixar_csv",
     "Formulário do adotante": "page_form_adotante",
     "Formulário do animal": "page_form_animal",
     "Editar dados do adotante": "page_edit_adotante",
@@ -649,26 +837,14 @@ elif escolha == "Ver tabela de animais":
 elif escolha == "Acrescentar arquivos CSV":
     page_upload_csv()
 
-elif escolha == "Baixar arquivos CSV": # NOVO ROTEAMENTO
+elif escolha == "Baixar arquivos CSV":
     page_baixar_csv()
 
 elif escolha == "Formulário do adotante":
-    page_formulario(
-        "adotantes", 
-        "Formulário do Adotante",
-        q_nome="Qual o seu nome?",
-        q_tamanho="Qual o tamanho do animal desejado?",
-        q_moradia="Em que tipo de moradia você habita?"
-    )
+    page_formulario("adotantes", "Formulário do Adotante")
 
 elif escolha == "Formulário do animal":
-    page_formulario(
-        "animais",
-        "Formulário do Animal",
-        q_nome="Qual o nome do animal?",
-        q_tamanho="Qual o tamanho do animal?",
-        q_moradia="Qual a moradia ideal para o animal?"
-    )
+    page_formulario("animais", "Formulário do Animal")
 
 elif escolha == "Editar dados do adotante":
     page_editar_dados("adotantes", "Editar Dados do Adotante")
