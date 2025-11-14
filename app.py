@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import math  # Importado para a raiz quadrada (sqrt)
 
 # --- Configuração do Banco de Dados ---
 DB_NAME = "adocoes.db"
@@ -165,6 +166,78 @@ def update_data(table_name, id, nome, tamanho, moradia, peso_tamanho=None, peso_
     finally:
         conn.close()
 
+# --- Funções de Cálculo de Score (NOVA) ---
+
+def calculate_scores(adotante, animais_df):
+    """Calcula a similaridade de cosseno ponderada para cada animal."""
+    
+    scores_list = []
+    
+    try:
+        # 1. Preparar vetores do Adotante (B e P)
+        vetor_b_str = adotante['codigo_tamanho'] + adotante['codigo_moradia']
+        vetor_p_str = adotante['peso_tamanho'] + adotante['peso_moradia']
+        
+        # Converte strings '10010' e '33388' para listas de inteiros
+        B = [int(digit) for digit in vetor_b_str]
+        P = [int(digit) for digit in vetor_p_str]
+        
+        # 2. Calcular o Termo 2 do Denominador (lado do Adotante)
+        # √Σ(Bi * Pi)²
+        sum_Bi_Pi_sq = 0
+        for i in range(len(B)):
+            sum_Bi_Pi_sq += (B[i] * P[i])**2
+        
+        denominador_termo2 = math.sqrt(sum_Bi_Pi_sq)
+
+        # 3. Iterar sobre cada Animal para calcular o score
+        for _, animal in animais_df.iterrows():
+            
+            # 3.1 Preparar vetor do Animal (A)
+            vetor_a_str = animal['codigo_tamanho'] + animal['codigo_moradia']
+            A = [int(digit) for digit in vetor_a_str]
+            
+            # Garantia de que os vetores têm o mesmo tamanho
+            if len(A) != len(B):
+                st.error(f"Incompatibilidade de vetores entre adotante {adotante['nome']} e animal {animal['nome']}.")
+                continue
+                
+            numerador = 0
+            sum_Ai_Pi_sq = 0 # Para o Termo 1 do Denominador
+            
+            # 3.2 Calcular Numerador e Termo 1 do Denominador
+            # Numerador = Σ(Ai * Bi * Pi)
+            # Termo 1 = √Σ(Ai * Pi)²
+            for i in range(len(A)):
+                ai = A[i]
+                bi = B[i]
+                pi = P[i]
+                
+                numerador += (ai * bi * pi)
+                sum_Ai_Pi_sq += (ai * pi)**2
+            
+            denominador_termo1 = math.sqrt(sum_Ai_Pi_sq)
+            
+            # 3.3 Calcular Score Final
+            denominador_completo = denominador_termo1 * denominador_termo2
+            
+            if denominador_completo == 0:
+                score = 0.0 # Evita divisão por zero
+            else:
+                score = numerador / denominador_completo
+                
+            scores_list.append({'nome': animal['nome'], 'score': score})
+
+        # 4. Ordenar a lista final
+        sorted_scores = sorted(scores_list, key=lambda x: x['score'], reverse=True)
+        
+        return sorted_scores
+
+    except Exception as e:
+        st.error(f"Erro ao calcular scores: {e}")
+        return []
+
+
 # --- Definições das Páginas ---
 
 def page_ver_tabela(table_name, title):
@@ -229,9 +302,7 @@ def page_editar_dados(table_name, title):
     
     # Novas chaves para pesos (só para adotantes)
     peso_tamanho_key = f"edit_peso_tamanho_{table_name}"
-    # --- CORREÇÃO APLICADA AQUI ---
     peso_moradia_key = f"edit_peso_moradia_{table_name}"
-
 
     if data:
         # Se for uma nova busca (ou a primeira), carrega os dados no session_state
@@ -329,6 +400,68 @@ def page_editar_dados(table_name, title):
             if key in st.session_state:
                 del st.session_state[key]
 
+# --- PÁGINA DE COMPATIBILIDADE (NOVA) ---
+
+def page_compatibilidade():
+    """Página para calcular e exibir animais compatíveis com um adotante."""
+    st.title("Animais Compatíveis")
+    
+    search_name = st.text_input("Digite o nome do Adotante para buscar compatibilidade:")
+    
+    if not search_name:
+        st.info("Digite o nome de um adotante cadastrado para ver os animais compatíveis.")
+        return
+
+    # 1. Buscar o adotante
+    adotante = find_data_by_name("adotantes", search_name)
+    
+    if not adotante:
+        st.error(f"Adotante com nome '{search_name}' não encontrado.")
+        return
+        
+    st.success(f"Calculando compatibilidade para: **{adotante['nome']}**")
+    st.write(f"Preferências: {adotante['tamanho']} (peso {adotante['peso_tamanho'][0]}), {adotante['moradia']} (peso {adotante['peso_moradia'][0]})")
+    
+    # 2. Buscar TODOS os animais
+    animais_df = get_all_data("animais")
+    if animais_df.empty:
+        st.warning("Nenhum animal cadastrado no banco de dados.")
+        return
+        
+    # 3. Calcular os scores
+    sorted_scores = calculate_scores(adotante, animais_df)
+    
+    if not sorted_scores:
+        st.info("Cálculo concluído, mas nenhum score foi gerado.")
+        return
+
+    # 4. Aplicar a lógica de exibição (Top 10 + empates)
+    
+    resultado_final = []
+    
+    if len(sorted_scores) <= 10:
+        # Regra: Menos de 10 animais, mostra todos
+        resultado_final = sorted_scores
+    else:
+        # Regra: Mais de 10 animais, pega o score do 10º
+        score_do_decimo = sorted_scores[9]['score'] # Índice 9 é o 10º item
+        
+        # Filtra: todos com score >= ao 10º
+        resultado_final = [s for s in sorted_scores if s['score'] >= score_do_decimo]
+
+    # 5. Exibir os resultados
+    st.subheader(f"Lista de {len(resultado_final)} Animais Mais Compatíveis:")
+    
+    # Converte para DataFrame para exibição bonita
+    df_resultado = pd.DataFrame(resultado_final)
+    # Ajusta o índice para começar em 1 (ranking)
+    df_resultado.index = df_resultado.index + 1
+    
+    st.dataframe(
+        df_resultado.style.format({'score': '{:.4f}'}), # Formata o score
+        use_container_width=True
+    )
+
 
 # --- Execução Principal da Aplicação ---
 
@@ -339,6 +472,7 @@ st.sidebar.title("Navegação da Aplicação")
 st.sidebar.info("Sistema de Gerenciamento de Adoções")
 
 paginas = {
+    "Animais compatíveis": "page_compatibilidade", # NOVA PÁGINA
     "Ver tabela de adotantes": "page_ver_adotantes",
     "Ver tabela de animais": "page_ver_animais",
     "Formulário do adotante": "page_form_adotante",
@@ -379,3 +513,6 @@ elif escolha == "Editar dados do adotante":
 
 elif escolha == "Editar dados do animal":
     page_editar_dados("animais", "Editar Dados do Animal")
+
+elif escolha == "Animais compatíveis": # NOVO ROTEAMENTO
+    page_compatibilidade()
