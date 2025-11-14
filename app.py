@@ -759,21 +759,27 @@ def page_compatibilidade():
     """Página para calcular e exibir animais compatíveis com um adotante."""
     st.title("Animais Compatíveis")
     
-    search_name = st.text_input("Digite o nome do Adotante para buscar compatibilidade:")
+    # --- MUDANÇA: Buscar por ID ---
+    search_id = st.number_input(
+        "Digite o ID do Adotante para buscar compatibilidade:",
+        min_value=1,
+        step=1,
+        value=None
+    )
     
-    if not search_name:
-        st.info("Digite o nome de um adotante cadastrado para ver os animais compatíveis.")
+    if not search_id:
+        st.info("Digite o ID de um adotante cadastrado para ver os animais compatíveis.")
         return
 
-    # 1. Buscar o adotante
-    adotante = find_data_by_name("adotantes", search_name)
+    # 1. Buscar o adotante por ID
+    adotante = find_data_by_id("adotantes", search_id)
     
     if not adotante:
-        st.error(f"Adotante com nome '{search_name}' não encontrado.")
+        st.error(f"Adotante com ID '{search_id}' não encontrado.")
         return
     
     # -------------------------------------------------------------
-    # --- ALTERAÇÃO PRINCIPAL: FILTRAR ANIMAIS PELO TIPO PRIMEIRO ---
+    # --- Lógica de FILTRAR ANIMAIS PELO TIPO ---
     # -------------------------------------------------------------
     tipo_preferido = adotante['tipo']
     st.success(f"Calculando compatibilidade para: **{adotante['nome']}** (ID: {adotante['id']})")
