@@ -167,7 +167,10 @@ def update_data(table_name, id, nome, tamanho, moradia, peso_tamanho=None, peso_
         conn.close()
 
 def replace_table_from_csv(table_name, uploaded_file):
-    """Apaga todos os dados de uma tabela e os substitui por um CSV."""
+    """
+    Apaga todos os dados de uma tabela e os substitui por um CSV.
+    Retorna (True, 'mensagem de sucesso') ou (False, 'mensagem de erro').
+    """
     
     # Define as colunas obrigatórias para cada tabela
     if table_name == 'animais':
@@ -175,18 +178,18 @@ def replace_table_from_csv(table_name, uploaded_file):
     elif table_name == 'adotantes':
         required_cols = ['nome', 'tamanho', 'codigo_tamanho', 'moradia', 'codigo_moradia', 'peso_tamanho', 'peso_moradia']
     else:
-        st.error(f"Tabela '{table_name}' desconhecida.")
-        return
+        return (False, f"Tabela '{table_name}' desconhecida.")
 
     try:
         df = pd.read_csv(uploaded_file)
         
         # 1. Validação: Verifica se todas as colunas necessárias existem no CSV
         if not all(col in df.columns for col in required_cols):
-            st.error(f"Erro: O CSV não contém todas as colunas necessárias. Faltando: {set(required_cols) - set(df.columns)}")
+            missing_cols = set(required_cols) - set(df.columns)
+            message = f"Erro: O CSV não contém todas as colunas necessárias. Faltando: {missing_cols}"
             st.info(f"Colunas necessárias: {required_cols}")
             st.info(f"Colunas encontradas: {list(df.columns)}")
-            return
+            return (False, message)
             
         # 2. Seleciona apenas as colunas necessárias (ignora 'id' ou extras)
         df_to_insert = df[required_cols]
@@ -198,22 +201,24 @@ def replace_table_from_csv(table_name, uploaded_file):
         try:
             # 3.1 Apaga dados antigos
             cursor.execute(f"DELETE FROM {table_name}")
-            st.warning(f"Dados antigos da tabela '{table_name}' apagados.")
             
             # 3.2 Insere dados novos usando a função 'to_sql' do pandas
             df_to_insert.to_sql(table_name, conn, if_exists='append', index=False)
             
             conn.commit()
-            st.success(f"Tabela '{table_name}' substituída com sucesso! {len(df_to_insert)} registros inseridos.")
+            message = f"Tabela '{table_name}' substituída com sucesso! {len(df_to_insert)} registros inseridos."
+            return (True, message)
             
         except Exception as e:
             conn.rollback() # Desfaz a operação em caso de erro
-            st.error(f"Falha na transação com o banco de dados: {e}")
+            message = f"Falha na transação com o banco de dados: {e}"
+            return (False, message)
         finally:
             conn.close()
 
     except Exception as e:
-        st.error(f"Erro ao ler o arquivo CSV: {e}")
+        message = f"Erro ao ler o arquivo CSV: {e}"
+        return (False, message)
 
 
 # --- Funções de Cálculo de Score ---
@@ -286,6 +291,14 @@ def calculate_scores(adotante, animais_df):
     except Exception as e:
         st.error(f"Erro ao calcular scores: {e}")
         return []
+
+
+# --- Funções de Conversão (para Download) ---
+
+@st.cache_data
+def convert_df_to_csv(df):
+    """Converte um DataFrame para CSV em memória, pronto para download."""
+    return df.to_csv(index=False).encode('utf-8')
 
 
 # --- Definições das Páginas ---
@@ -432,7 +445,7 @@ def page_editar_dados(table_name, title):
                         st.session_state[moradia_key]
                     )
 
-                # Limpa o state após a atualização
+                # Limpa o state após η atualização
                 keys_to_clear = [id_key, nome_key, tamanho_key, moradia_key, 
                                  peso_tamanho_key, peso_moradia_key]
                 for key in keys_to_clear:
@@ -456,6 +469,16 @@ def page_editar_dados(table_name, title):
 def page_upload_csv():
     """Página para substituir dados da tabela por um arquivo CSV."""
     st.title("Acrescentar arquivos CSV")
+
+    # Exibe a mensagem de sucesso/erro do session_state, se existir
+    if "csv_message" in st.session_state:
+        message_type, message_text = st.session_state["csv_message"]
+        if message_type == "success":
+            st.success(message_text)
+        elif message_type == "error":
+            st.error(message_text)
+        del st.session_state["csv_message"] # Limpa a mensagem após exibir
+
     st.warning("ATENÇÃO: Fazer o upload de um arquivo aqui apagará TODOS os dados atuais da tabela correspondente e os substituirá pelo conteúdo do CSV.")
 
     st.markdown("---")
@@ -468,8 +491,12 @@ def page_upload_csv():
     if uploader_animais:
         # Adiciona um botão de confirmação antes da ação destrutiva
         if st.button("Confirmar Substituição - ANIMAIS"):
-            replace_table_from_csv("animais", uploader_animais)
-            # --- LINHA REMOVIDA DAQUI ---
+            success, message = replace_table_from_csv("animais", uploader_animais)
+            # Armazena a mensagem no state e recarrega a página
+            if success:
+                st.session_state["csv_message"] = ("success", message)
+            else:
+                st.session_state["csv_message"] = ("error", message)
             st.rerun()
 
     st.markdown("---")
@@ -482,9 +509,48 @@ def page_upload_csv():
     if uploader_adotantes:
          # Adiciona um botão de confirmação
         if st.button("Confirmar Substituição - ADOTANTES"):
-            replace_table_from_csv("adotantes", uploader_adotantes)
-            # --- LINHA REMOVIDA DAQUI ---
+            success, message = replace_table_from_csv("adotantes", uploader_adotantes)
+            # Armazena a mensagem no state e recarrega a página
+            if success:
+                st.session_state["csv_message"] = ("success", message)
+            else:
+                st.session_state["csv_message"] = ("error", message)
             st.rerun()
+
+
+# --- PÁGINA DE DOWNLOAD CSV (NOVA) ---
+
+def page_baixar_csv():
+    """Página para baixar as tabelas 'animais' e 'adotantes' como CSV."""
+    st.title("Baixar arquivos CSV")
+
+    st.markdown("---")
+    st.subheader("Baixar Tabela de Animais")
+    df_animais = get_all_data("animais")
+    if df_animais.empty:
+        st.info("Tabela 'animais' está vazia. Nada para baixar.")
+    else:
+        csv_animais = convert_df_to_csv(df_animais)
+        st.download_button(
+            label="Baixar 'animais.csv'",
+            data=csv_animais,
+            file_name='animais.csv',
+            mime='text/csv',
+        )
+
+    st.markdown("---")
+    st.subheader("Baixar Tabela de Adotantes")
+    df_adotantes = get_all_data("adotantes")
+    if df_adotantes.empty:
+        st.info("Tabela 'adotantes' está vazia. Nada para baixar.")
+    else:
+        csv_adotantes = convert_df_to_csv(df_adotantes)
+        st.download_button(
+            label="Baixar 'adotantes.csv'",
+            data=csv_adotantes,
+            file_name='adotantes.csv',
+            mime='text/csv',
+        )
 
 
 # --- PÁGINA DE COMPATIBILIDADE ---
@@ -562,12 +628,13 @@ st.sidebar.info("Sistema de Gerenciamento de Adoções")
 paginas = {
     "Ver tabela de adotantes": "page_ver_adotantes",
     "Ver tabela de animais": "page_ver_animais",
-    "Acrescentar arquivos CSV": "page_upload_csv", # NOVA PÁGINA
+    "Acrescentar arquivos CSV": "page_upload_csv",
+    "Baixar arquivos CSV": "page_baixar_csv", # NOVA PÁGINA
     "Formulário do adotante": "page_form_adotante",
     "Formulário do animal": "page_form_animal",
     "Editar dados do adotante": "page_edit_adotante",
     "Editar dados do animal": "page_edit_animal",
-    "Animais compatíveis": "page_compatibilidade" # MOVDA PARA O FIM
+    "Animais compatíveis": "page_compatibilidade"
 }
 
 escolha = st.sidebar.radio("Escolha uma página:", list(paginas.keys()))
@@ -579,8 +646,11 @@ if escolha == "Ver tabela de adotantes":
 elif escolha == "Ver tabela de animais":
     page_ver_tabela("animais", "Ver Tabela de Animais")
 
-elif escolha == "Acrescentar arquivos CSV": # NOVO ROTEAMENTO
+elif escolha == "Acrescentar arquivos CSV":
     page_upload_csv()
+
+elif escolha == "Baixar arquivos CSV": # NOVO ROTEAMENTO
+    page_baixar_csv()
 
 elif escolha == "Formulário do adotante":
     page_formulario(
